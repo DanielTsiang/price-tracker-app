@@ -1,5 +1,5 @@
-import json
 import logging
+import os
 import time as thread_time  # Use alias for sleep
 from datetime import datetime, time
 
@@ -7,24 +7,23 @@ import pandas as pd
 import requests
 import streamlit as st
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import TimeoutException
-
+from sqlalchemy import Engine, create_engine, text
 
 # --- Basic Configuration ---
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
 # --- Constants ---
 PRODUCT_URL: str = "https://www.dreams.co.uk/flaxby-oxtons-guild-pocket-sprung-mattress/p/131-01043-configurable"
-CSV_FILE: str = "price_history.csv"
-SCHEDULE_FILE: str = "schedule.json"
 NTFY_TOPIC: str = "mattress-price-tracker-flaxby"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Desired mattress specifications
 DESIRED_SIZE: str = "5'0 King"
@@ -32,29 +31,113 @@ DESIRED_COMFORT: str = "Very Firm"
 DESIRED_ZIPPED: str = "Non Zipped"
 
 
-# --- Schedule Persistence ---
-def save_schedule(time_obj: time, enabled: bool) -> None:
-    """Saves the schedule state (time and enabled status) to a JSON file."""
+# --- Database Setup ---
+@st.cache_resource
+def get_database_engine() -> Engine:
+    """Creates and caches a SQLAlchemy engine."""
+    if not DATABASE_URL:
+        st.error("DATABASE_URL environment variable is not set. Please configure it.")
+        st.stop()
     try:
-        with open(SCHEDULE_FILE, 'w') as f:
-            json.dump({'time': time_obj.strftime("%H:%M"), 'enabled': enabled}, f)
-        logger.info(f"Schedule saved: {time_obj.strftime('%H:%M')}, Enabled: {enabled}")
+        return create_engine(DATABASE_URL)
     except Exception as e:
-        st.error(f"Failed to save schedule: {e}")
-        logger.error(f"Failed to save schedule: {e}")
+        logger.error(f"Failed to create database engine: {e}")
+        st.error(
+            f"Could not connect to the database. Please check the DATABASE_URL. Error: {e}"
+        )
+        st.stop()
 
 
-def load_schedule() -> tuple[time, bool]:
-    """Loads schedule from JSON file, returns defaults if not found."""
+def init_database(engine):
+    """Initializes the database tables if they don't exist."""
     try:
-        with open(SCHEDULE_FILE, 'r') as f:
-            data = json.load(f)
-            time_str = data.get('time', '09:00')
-            enabled = data.get('enabled', True)  # Default to True if not found
-            time_obj = datetime.strptime(time_str, "%H:%M").time()
-            return time_obj, enabled
-    except (FileNotFoundError, json.JSONDecodeError):
-        return time(9, 0), True  # Default to 9 AM, enabled
+        with engine.connect() as connection:
+            # Create price history table
+            connection.execute(
+                text(
+                    """
+                CREATE TABLE IF NOT EXISTS price_history (
+                    id SERIAL PRIMARY KEY,
+                    "Date" DATE NOT NULL,
+                    "Time" TIME NOT NULL,
+                    "Price" NUMERIC(10, 2) NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+            """
+                )
+            )
+            # Create schedule settings table
+            connection.execute(
+                text(
+                    """
+                CREATE TABLE IF NOT EXISTS schedule_settings (
+                    id INT PRIMARY KEY,
+                    check_time TIME NOT NULL,
+                    is_enabled BOOLEAN NOT NULL
+                );
+            """
+                )
+            )
+            # Ensure a default schedule setting exists
+            connection.execute(
+                text(
+                    """
+                INSERT INTO schedule_settings (id, check_time, is_enabled)
+                VALUES (1, '09:00:00', TRUE)
+                ON CONFLICT (id) DO NOTHING;
+            """
+                )
+            )
+            connection.commit()
+    except Exception as e:
+        logger.error(f"Failed to initialize database tables: {e}")
+        st.error(f"Failed to create tables in the database. Error: {e}")
+        st.stop()
+
+
+# --- Schedule Persistence in database ---
+def save_schedule(engine: Engine, time_obj: time, enabled: bool) -> None:
+    """Saves the schedule state to the database."""
+    try:
+        with engine.connect() as connection:
+            insert_schedule_statement = text(
+                """
+                INSERT INTO schedule_settings (id, check_time, is_enabled)
+                VALUES (1, :check_time, :is_enabled)
+                ON CONFLICT (id) DO UPDATE
+                SET check_time = EXCLUDED.check_time,
+                    is_enabled = EXCLUDED.is_enabled;
+            """
+            )
+            connection.execute(
+                insert_schedule_statement,
+                {"check_time": time_obj, "is_enabled": enabled},
+            )
+            connection.commit()
+        logger.info(
+            f"Schedule saved to database: {time_obj.strftime('%H:%M')}, Enabled: {enabled}"
+        )
+    except Exception as e:
+        st.error(f"Failed to save schedule to database: {e}")
+        logger.error(f"Failed to save schedule to database: {e}")
+
+
+def load_schedule(engine: Engine) -> tuple[time, bool]:
+    """Loads schedule from the database."""
+    try:
+        with engine.connect() as connection:
+            if schedule_setting := connection.execute(
+                text(
+                    "SELECT check_time, is_enabled FROM schedule_settings WHERE id = 1"
+                )
+            ).first():
+                return schedule_setting.check_time, schedule_setting.is_enabled
+            logger.info("No schedule found in the database, using defaults.")
+            return time(9, 0), True
+    except Exception as e:
+        logger.error(f"Failed to load schedule from database: {e}")
+        st.error("Could not load schedule from the database. Using defaults.")
+        return time(9, 0), True
 
 
 # --- Web Scraping with Selenium ---
@@ -68,10 +151,10 @@ def get_mattress_price() -> float | None:
     try:
         # --- WebDriver Setup ---
         options = webdriver.ChromeOptions()
-        options.add_argument('--headless')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-gpu')
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
 
         driver = webdriver.Chrome(options=options)
 
@@ -81,39 +164,29 @@ def get_mattress_price() -> float | None:
         # 1. Accept cookies
         try:
             cookie_button = wait.until(
-                expected_conditions.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler")))
+                expected_conditions.element_to_be_clickable(
+                    (By.ID, "onetrust-accept-btn-handler")
+                )
+            )
             cookie_button.click()
             logger.info("Accepted cookies.")
         except TimeoutException:
             logger.info("Cookie banner not found, skipping.")
-            pass
 
         # 2. Select options
         logger.info("Selecting mattress options...")
-        size_button = wait.until(
-            expected_conditions.element_to_be_clickable(
-                (By.XPATH, f'//button[.//span[normalize-space(.) = "{DESIRED_SIZE}"]]')))
-        driver.execute_script("arguments[0].click();", size_button)
-        thread_time.sleep(0.5)
-
-        comfort_button = wait.until(
-            expected_conditions.element_to_be_clickable(
-                (By.XPATH, f'//button[.//span[normalize-space(.) = "{DESIRED_COMFORT}"]]')))
-        driver.execute_script("arguments[0].click();", comfort_button)
-        thread_time.sleep(0.5)
-
-        zipped_button = wait.until(
-            expected_conditions.element_to_be_clickable(
-                (By.XPATH, f'//button[.//span[normalize-space(.) = "{DESIRED_ZIPPED}"]]')))
-        driver.execute_script("arguments[0].click();", zipped_button)
-        thread_time.sleep(0.5)
+        click_button(wait, DESIRED_SIZE, driver)
+        click_button(wait, DESIRED_COMFORT, driver)
+        click_button(wait, DESIRED_ZIPPED, driver)
         logger.info("Mattress options selected successfully.")
 
         # 3. Get Price
         price_element = wait.until(
             expected_conditions.visibility_of_element_located(
-                (By.CSS_SELECTOR, '.heading.dreams-product-price__price')))
-        price_str: str = price_element.text.strip().replace('£', '').replace(',', '')
+                (By.CSS_SELECTOR, ".heading.dreams-product-price__price")
+            )
+        )
+        price_str: str = price_element.text.strip().replace("£", "").replace(",", "")
         logger.info(f"Successfully scraped price: £{price_str}")
 
         return float(price_str)
@@ -128,24 +201,34 @@ def get_mattress_price() -> float | None:
         logger.info("Browser closed.")
 
 
-# --- CSV Handling ---
-def update_price_history(price: float) -> bool:
-    """Updates the CSV file with the new price and timestamp."""
+def click_button(wait: WebDriverWait, spec: str, driver: WebDriver):
+    size_button = wait.until(
+        expected_conditions.element_to_be_clickable(
+            (By.XPATH, f'//button[.//span[normalize-space(.) = "{spec}"]]')
+        )
+    )
+    driver.execute_script("arguments[0].click();", size_button)
+    thread_time.sleep(0.5)
+
+
+# --- Database Handling ---
+def update_price_history(price: float, engine: Engine) -> bool:
+    """Writes the new price and timestamp to the database."""
     try:
         now: datetime = datetime.now()
-        new_entry: pd.DataFrame = pd.DataFrame([[now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), price]],
-                                               columns=['Date', 'Time', 'Price'])
-        try:
-            df: pd.DataFrame = pd.read_csv(CSV_FILE)
-            df = pd.concat([df, new_entry], ignore_index=True)
-        except FileNotFoundError:
-            df = new_entry
-        df.to_csv(CSV_FILE, index=False)
-        logger.info(f"Updated price history with new price: £{price}")
+        new_entry: pd.DataFrame = pd.DataFrame(
+            {
+                "Date": [now.strftime("%Y-%m-%d")],
+                "Time": [now.strftime("%H:%M:%S")],
+                "Price": [price],
+            }
+        )
+        new_entry.to_sql("price_history", con=engine, if_exists="append", index=False)
+        logger.info(f"Updated price history in database with new price: £{price}")
         return True
     except Exception as e:
-        st.error(f"Error updating CSV: {e}")
-        logger.error(f"Error updating CSV: {e}")
+        st.error(f"Error updating database: {e}")
+        logger.error(f"Error updating database: {e}")
         return False
 
 
@@ -153,60 +236,61 @@ def update_price_history(price: float) -> bool:
 def send_nfty_notification(price: float) -> None:
     """Sends a push notification using ntfy.sh."""
     try:
-        requests.post(f"https://ntfy.sh/{NTFY_TOPIC}",
-                      data=f"The mattress price is now £{price:.2f}".encode(encoding='utf-8'),
-                      headers={"Title": "Mattress Price Alert", "Priority": "high", "Tags": "bed,money"})
+        requests.post(
+            f"https://ntfy.sh/{NTFY_TOPIC}",
+            data=f"The mattress price is now £{price:.2f}".encode(encoding="utf-8"),
+            headers={
+                "Title": "Mattress Price Alert",
+                "Priority": "high",
+                "Tags": "bed,money",
+            },
+        )
         logger.info("Sent ntfy.sh notification.")
     except Exception as e:
         st.error(f"Failed to send notification: {e}")
-        logger.error(f"Failed to send notification: {e}")
 
 
 # --- Core Job Logic ---
-def run_price_check_job() -> None:
+def run_price_check_job(engine: Engine) -> None:
     """
     This is the main job: it gets the price, updates the history,
     and sends a notification.
     """
     logger.info("Starting price check job...")
     price: float | None = get_mattress_price()
-    if price is not None:
-        if update_price_history(price):
-            send_nfty_notification(price)
-            st.toast(f"✅ Price updated: £{price:.2f}. Notification sent!")
-            logger.info(f"Job completed: price £{price:.2f} added to CSV and notification sent.")
-        else:
-            st.toast("🚨 Failed to update CSV file.")
-            logger.error(f"Failed to update CSV for price £{price:.2f}")
-    else:
+    if price is None:
         st.toast("🚨 Failed to retrieve price.")
-        logger.error("Failed to retrieve price during job execution.")
+
+    elif update_price_history(price, engine):
+        send_nfty_notification(price)
+        st.toast(f"✅ Price updated: £{price:.2f}. Notification sent!")
+    else:
+        st.toast("🚨 Failed to update database.")
 
 
 # --- Streamlit App UI and Logic ---
-
 @st.fragment
-def display_price_history():
-    """UI fragment to display the price history table."""
+def display_price_history(engine: Engine):
+    """UI fragment to display the price history table from the database."""
     try:
-        df: pd.DataFrame = pd.read_csv(CSV_FILE)
-        df_sorted: pd.DataFrame = df.sort_values(by=['Date', 'Time'], ascending=False)
-        st.dataframe(df_sorted.style.format({'Price': '£{:.2f}'}), use_container_width=True)
-    except FileNotFoundError:
-        st.info("No price history found. Check the price to start tracking.")
+        df = pd.read_sql(
+            'SELECT "Date", "Time", "Price" FROM price_history ORDER BY "Date" DESC, "Time" DESC',
+            engine,
+        )
+        st.dataframe(df.style.format({"Price": "£{:.2f}"}), use_container_width=True)
     except Exception as e:
-        st.error(f"Could not load price history: {e}")
-        logger.error(f"Could not load price history: {e}")
+        st.info("No price history found in the database, or an error occurred.")
+        logger.error(f"Could not load price history from database: {e}")
 
 
 @st.fragment(run_every="10s")
-def scheduled_check_fragment():
+def scheduled_check_fragment(engine: Engine):
     """
     This fragment runs every 10 seconds to check if the scheduled time has been reached.
     It uses session_state to ensure the job only runs once per scheduled time.
     """
     # Exit early if the schedule is disabled in the session state
-    if not st.session_state.get('schedule_enabled', True):
+    if not st.session_state.get("schedule_enabled", True):
         return
 
     scheduled_time = st.session_state.schedule_time
@@ -216,12 +300,18 @@ def scheduled_check_fragment():
     run_key = f"{now.date()}-{scheduled_time.strftime('%H:%M')}"
 
     # Check if the time matches and if we haven't already run for this key
-    if (now.hour == scheduled_time.hour and
-            now.minute == scheduled_time.minute and
-            st.session_state.get('last_run_key') != run_key):
-        logger.info(f"Scheduled time {scheduled_time.strftime('%H:%M')} reached. Running job.")
-        run_price_check_job()
-        st.session_state['last_run_key'] = run_key  # Mark as run to prevent re-execution
+    if (
+        now.hour == scheduled_time.hour
+        and now.minute == scheduled_time.minute
+        and st.session_state.get("last_run_key") != run_key
+    ):
+        logger.info(
+            f"Scheduled time {scheduled_time.strftime('%H:%M')} reached. Running job."
+        )
+        run_price_check_job(engine)
+        st.session_state[
+            "last_run_key"
+        ] = run_key  # Mark as run to prevent re-execution
         st.rerun()  # Rerun the app to update the history table immediately
 
 
@@ -233,19 +323,22 @@ def main() -> None:
         st.json({"health": "green"})
         return
 
-    st.set_page_config(page_title="Mattress Price Tracker", page_icon="🛏️", layout="wide")
+    st.set_page_config(
+        page_title="Mattress Price Tracker", page_icon="🛏️", layout="wide"
+    )
+
+    # Get DB engine and initialize the table
+    engine = get_database_engine()
+    init_database(engine)
+
     st.title("Mattress Price Tracker")
 
     # Initialise session state if not already done
-    if 'schedule_time' not in st.session_state:
-        if 'schedule_time' not in st.session_state:
-            scheduled_time, schedule_enabled = load_schedule()
-            time_val, enabled_val = load_schedule()
-            st.session_state.schedule_time = scheduled_time
-            st.session_state.schedule_time = time_val
-            st.session_state.schedule_enabled = schedule_enabled
-            st.session_state.schedule_enabled = enabled_val
-            st.session_state.last_run_key = None
+    if "schedule_time" not in st.session_state:
+        scheduled_time, schedule_enabled = load_schedule(engine)
+        st.session_state.schedule_time = scheduled_time
+        st.session_state.schedule_enabled = schedule_enabled
+        st.session_state.last_run_key = None
 
     # --- Scheduler UI in Sidebar ---
     with st.sidebar:
@@ -260,8 +353,8 @@ def main() -> None:
             st.session_state.schedule_time = new_time
             st.session_state.schedule_enabled = new_enabled_status
 
-            # Persist changes to file
-            save_schedule(new_time, new_enabled_status)
+            # Persist changes
+            save_schedule(engine, new_time, new_enabled_status)
             st.toast("Schedule settings saved!")
 
         st.toggle(
@@ -269,7 +362,7 @@ def main() -> None:
             value=st.session_state.schedule_enabled,
             key="schedule_enabled_widget",
             on_change=on_schedule_settings_change,
-            help="Toggle the automatic daily price check on or off."
+            help="Toggle the automatic daily price check on or off.",
         )
 
         st.time_input(
@@ -278,29 +371,36 @@ def main() -> None:
             key="time_input_widget",
             on_change=on_schedule_settings_change,
             help="Set the time for the automatic daily price check.",
-            disabled=not st.session_state.schedule_enabled
+            disabled=not st.session_state.schedule_enabled,
         )
 
         st.divider()
 
         st.header("Notifications")
         ntfy_url = f"https://ntfy.sh/{NTFY_TOPIC}"
-        st.markdown(f"Subscribe to notifications on your phone or desktop at:")
+        st.markdown("Subscribe to notifications on your phone or desktop at:")
         st.markdown(f"[{ntfy_url}]({ntfy_url})")
 
-        if st.button("Send Notification Now", help="Sends a notification with the last known price."):
+        if st.button(
+            "Send Notification Now",
+            help="Sends a notification with the last known price.",
+        ):
             try:
-                df = pd.read_csv(CSV_FILE)
-                if not df.empty:
-                    last_price = df['Price'].iloc[-1]
+                last_price_df = pd.read_sql(
+                    'SELECT "Price" FROM price_history ORDER BY created_at DESC LIMIT 1',
+                    engine,
+                )
+                if not last_price_df.empty:
+                    last_price = last_price_df["Price"].iloc[0]
                     send_nfty_notification(last_price)
-                    st.sidebar.success(f"Notification sent for price: £{last_price:.2f}")
+                    st.sidebar.success(
+                        f"Notification sent for price: £{last_price:.2f}"
+                    )
                 else:
                     st.sidebar.warning("Price history is empty.")
-            except (FileNotFoundError, IndexError):
-                st.sidebar.warning("No price history found. Check price first.")
+            except Exception as e:
+                st.sidebar.error(f"Database Error: {e}")
 
-    # --- Main Page Content ---
     col1, col2 = st.columns([1, 2])
     with col1:
         st.markdown(f"Tracking price for [Flaxby Oxtons Guild]({PRODUCT_URL}).")
@@ -308,20 +408,20 @@ def main() -> None:
 
         if st.button("Check Price Now", type="primary"):
             with st.spinner("Scraping website for current price..."):
-                price: float | None = get_mattress_price()
+                price = get_mattress_price()
                 if price is not None:
                     st.success(f"The current price is £{price:.2f}")
-                    update_price_history(price)
+                    update_price_history(price, engine)
                     st.rerun()  # Rerun to update the history table
                 else:
                     st.error("Failed to retrieve the price.")
 
     with col2:
         st.subheader("Price History")
-        display_price_history()
+        display_price_history(engine)
 
     # This fragment will run in the background to check the schedule
-    scheduled_check_fragment()
+    scheduled_check_fragment(engine)
 
 
 if __name__ == "__main__":

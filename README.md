@@ -4,6 +4,12 @@ This Streamlit application automates the process of checking and tracking the pr
 
 The app features both manual and scheduled price checks, logs the price history to a local CSV file, and sends push notifications for scheduled updates. The entire scheduling and checking process is handled within the Streamlit framework.
 
+## 🚀 Live Application
+
+You can view and use the live, deployed application here:
+
+**[https://price-tracker-mattress.streamlit.app/](https://price-tracker-mattress.streamlit.app/)**
+
 ## Features
 
 * **Automated Browser Interaction**: Uses Selenium to select specific product options (e.g., size, comfort grade) to get the correct price.

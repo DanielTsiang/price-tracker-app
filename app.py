@@ -7,12 +7,11 @@ import pandas as pd
 import requests
 import streamlit as st
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException
-from webdriver_manager.chrome import ChromeDriverManager
+
 
 # --- Basic Configuration ---
 logging.basicConfig(
@@ -72,11 +71,9 @@ def get_mattress_price() -> float | None:
         options.add_argument('--headless')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
-        options.add_argument(
-            "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+        options.add_argument('--disable-gpu')
 
-        service: Service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
+        driver = webdriver.Chrome(options=options)
 
         driver.get(PRODUCT_URL)
         wait: WebDriverWait = WebDriverWait(driver, 20)
@@ -230,15 +227,25 @@ def scheduled_check_fragment():
 
 def main() -> None:
     """The main function for the Streamlit application."""
+    # --- Health Check Endpoint ---
+    # If the 'endpoint' query parameter is set to 'health', return a JSON response and exit.
+    if st.query_params.get("endpoint") == "health":
+        st.json({"health": "green"})
+        return
+
     st.set_page_config(page_title="Mattress Price Tracker", page_icon="🛏️", layout="wide")
     st.title("Mattress Price Tracker")
 
-    # Initialize session state if not already done
+    # Initialise session state if not already done
     if 'schedule_time' not in st.session_state:
-        scheduled_time, schedule_enabled = load_schedule()
-        st.session_state.schedule_time = scheduled_time
-        st.session_state.schedule_enabled = schedule_enabled
-        st.session_state.last_run_key = None
+        if 'schedule_time' not in st.session_state:
+            scheduled_time, schedule_enabled = load_schedule()
+            time_val, enabled_val = load_schedule()
+            st.session_state.schedule_time = scheduled_time
+            st.session_state.schedule_time = time_val
+            st.session_state.schedule_enabled = schedule_enabled
+            st.session_state.schedule_enabled = enabled_val
+            st.session_state.last_run_key = None
 
     # --- Scheduler UI in Sidebar ---
     with st.sidebar:
@@ -296,7 +303,7 @@ def main() -> None:
     # --- Main Page Content ---
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.markdown(f"Tracking price for [Flaxby Oxtons Guild Pocket Sprung Mattress]({PRODUCT_URL}).")
+        st.markdown(f"Tracking price for [Flaxby Oxtons Guild]({PRODUCT_URL}).")
         st.write(f"**Specs:** {DESIRED_SIZE}, {DESIRED_COMFORT}, {DESIRED_ZIPPED}")
 
         if st.button("Check Price Now", type="primary"):

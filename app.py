@@ -154,7 +154,6 @@ def get_mattress_price() -> float | None:
         options.add_argument("--headless")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
 
         driver = webdriver.Chrome(options=options)
 
@@ -410,7 +409,6 @@ def main() -> None:
             with st.spinner("Scraping website for current price..."):
                 price = get_mattress_price()
                 if price is not None:
-                    st.success(f"The current price is £{price:.2f}")
                     update_price_history(price, engine)
                     st.rerun()  # Rerun to update the history table
                 else:

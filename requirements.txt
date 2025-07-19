@@ -4,4 +4,3 @@ requests==2.32.4
 selenium==4.34.2
 SQLAlchemy==2.0.41
 streamlit==1.47.0
-webdriver-manager==4.0.2

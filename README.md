@@ -1,18 +1,20 @@
 # Mattress Price Tracker 🛏️
 
-This Streamlit application automates the process of checking and tracking the price of a specific mattress from the Dreams.co.uk website. It uses Selenium to navigate the product page, select user-defined options (size, comfort, etc.), and retrieve the accurate price.
+This Streamlit application automates the process of checking and tracking the price of a specific mattress from the Dreams.co.uk website. It uses the `requests` library to call the website's internal API directly, making it a fast and efficient way to retrieve the accurate price for a specific product configuration.
 
-The app features both manual and scheduled price checks, logs the price history to a local CSV file, and sends push notifications for scheduled updates. The entire scheduling and checking process is handled within the Streamlit framework.
+The app features both manual and scheduled price checks, logs the price history to a PostgreSQL database, and sends push notifications for scheduled updates. The entire scheduling and checking process is handled within the Streamlit framework.
 
+---
 ## 🚀 Live Application
 
 You can view and use the live, deployed application here:
 
 **[https://price-tracker-mattress.streamlit.app/](https://price-tracker-mattress.streamlit.app/)**
 
+---
 ## Features
 
-* **Automated Browser Interaction**: Uses Selenium to select specific product options to get the correct price.
+* **Direct API Integration**: Fetches prices directly from the website's backend API, eliminating the need for a browser and making the process faster and more reliable.
 * **Manual Price Check**: Instantly check the current price with the click of a button.
 * **Persistent Storage**: Uses a PostgreSQL database to store all price history and schedule settings.
 * **User-Configurable Scheduling**: Set a daily time for the app to automatically check the price.
@@ -21,19 +23,19 @@ You can view and use the live, deployed application here:
 * **Health Check Endpoint**: A simple API endpoint for monitoring the app's status.
 * **Simple Web Interface**: Built with Streamlit for an easy-to-use interface accessible from your browser.
 
+---
 ## How to Use
 
 #### 1. Prerequisites
 
 * Python 3.9+
-* Google Chrome browser installed
 * A PostgreSQL database
 
 #### 2. Install Dependencies
 
 Install the required dependencies from the `requirements.txt` file:
 
-```
+```bash
 pip install -r requirements.txt
 ```
 
@@ -69,6 +71,6 @@ Your web browser will open a new tab at `http://localhost:8501`.
 
 * **Database Backend**: The app connects to a PostgreSQL database using SQLAlchemy. It manages a `price_history` table for logging prices and a `schedule_settings` table for the UI configuration.
 * **Health Check**: Accessing `/?endpoint=health` on the app's URL will return a `{"health": "green"}` JSON response, useful for automated monitoring.
-* **Web Scraping**: Selenium and `webdriver-manager` are used to launch a headless Chrome browser, navigate to the product page, accept cookies, and click the buttons corresponding to the desired mattress options.
+* **Price Retrieval**: The script sends a GET request directly to an internal product API endpoint. It passes the desired mattress specifications as URL parameters and parses the returned JSON to extract the current price.
 * **Scheduling**: A Streamlit `@st.fragment(run_every="10s")` function periodically checks if the current time matches the schedule stored in the database.
 * **Frontend**: `streamlit` provides the web interface, including the "Check Price Now" button, the schedule controls, the notification link, and the data table displaying the price history.

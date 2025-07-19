@@ -1,17 +1,10 @@
 import logging
 import os
-import time as thread_time  # Use alias for sleep
 from datetime import datetime, time
 
 import pandas as pd
 import requests
 import streamlit as st
-from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
-from selenium.webdriver.chrome.webdriver import WebDriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions
-from selenium.webdriver.support.ui import WebDriverWait
 from sqlalchemy import Engine, create_engine, text
 
 # --- Basic Configuration ---
@@ -21,7 +14,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Constants ---
-PRODUCT_URL: str = "https://www.dreams.co.uk/flaxby-oxtons-guild-pocket-sprung-mattress/p/131-01043-configurable"
+PRODUCT_URL: str = "https://www.dreams.co.uk/flaxby-oxtons-guild-pocket-sprung-mattress/p/135-01363/variant-selector?changedCategoryCode=b2c_comfort_grade&changedCategoryValue=VERY_FIRM&previousProductCode=135-01361"
 NTFY_TOPIC: str = "mattress-price-tracker-flaxby"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -140,74 +133,30 @@ def load_schedule(engine: Engine) -> tuple[time, bool]:
         return time(9, 0), True
 
 
-# --- Web Scraping with Selenium ---
 def get_mattress_price() -> float | None:
     """
-    Scrapes the Dreams website to get the price of the specified mattress
-    by selecting the correct options using Selenium.
-    """
-    driver: webdriver.Chrome | None = None
-    logger.info("Starting browser to check price...")
+    Fetches the price of the specified mattress directly from the Dreams API."""
+    logger.info("Calling Dreams API to check price...")
+
     try:
-        # --- WebDriver Setup ---
-        options = webdriver.ChromeOptions()
-        options.add_argument("--headless")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
+        response = requests.get(PRODUCT_URL, timeout=15)
+        response.raise_for_status()  # Raises an HTTPError for bad responses (4xx or 5xx)
 
-        driver = webdriver.Chrome(options=options)
+        data = response.json()
+        price = data["productData"]["price"]["value"]
+        price_float = float(price)
 
-        driver.get(PRODUCT_URL)
-        wait: WebDriverWait = WebDriverWait(driver, 20)
+        logger.info(f"Successfully fetched price from API: £{price_float:.2f}")
+        return price_float
 
-        # 1. Accept cookies
-        try:
-            cookie_button = wait.until(
-                expected_conditions.element_to_be_clickable(
-                    (By.ID, "onetrust-accept-btn-handler")
-                )
-            )
-            cookie_button.click()
-            logger.info("Accepted cookies.")
-        except TimeoutException:
-            logger.info("Cookie banner not found, skipping.")
-
-        # 2. Select options
-        logger.info("Selecting mattress options...")
-        click_button(wait, DESIRED_SIZE, driver)
-        click_button(wait, DESIRED_COMFORT, driver)
-        click_button(wait, DESIRED_ZIPPED, driver)
-        logger.info("Mattress options selected successfully.")
-
-        # 3. Get Price
-        price_element = wait.until(
-            expected_conditions.visibility_of_element_located(
-                (By.CSS_SELECTOR, ".heading.dreams-product-price__price")
-            )
-        )
-        price_str: str = price_element.text.strip().replace("£", "").replace(",", "")
-        logger.info(f"Successfully scraped price: £{price_str}")
-
-        return float(price_str)
-
-    except Exception as e:
-        st.error(f"An error occurred during scraping: {e}")
-        logger.error(f"An error occurred during scraping: {e}", exc_info=True)
+    except requests.exceptions.RequestException as e:
+        st.error(f"API request failed: {e}")
+        logger.error(f"API request failed: {e}", exc_info=True)
         return None
-    finally:
-        if driver:
-            driver.quit()
-        logger.info("Browser closed.")
-
-
-def click_button(wait: WebDriverWait, spec: str, driver: WebDriver):
-    size_button = wait.until(
-        expected_conditions.element_to_be_clickable(
-            (By.XPATH, f'//button[.//span[normalize-space(.) = "{spec}"]]')
-        )
-    )
-    driver.execute_script("arguments[0].click();", size_button)
-    thread_time.sleep(0.5)
+    except (KeyError, ValueError) as e:
+        st.error(f"Failed to parse price from API response: {e}")
+        logger.error(f"Failed to parse price from API response: {e}", exc_info=True)
+        return None
 
 
 # --- Database Handling ---

@@ -7,9 +7,10 @@ The app features both manual and scheduled price checks, logs the price history 
 ---
 ## 🚀 Live Application
 
-You can view and use the live, deployed application here:
+You can view and use the live, deployed application at the following URLs:
 
-**[https://price-tracker-mattress.streamlit.app/](https://price-tracker-mattress.streamlit.app/)**
+* **Render:** **[https://price-tracker-app-5joo.onrender.com/](https://price-tracker-app-5joo.onrender.com/)**
+* **Streamlit Community Cloud:** **[https://price-tracker-mattress.streamlit.app/](https://price-tracker-mattress.streamlit.app/)**
 
 ---
 ## Features

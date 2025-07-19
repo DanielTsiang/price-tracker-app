@@ -68,6 +68,14 @@ Your web browser will open a new tab at `http://localhost:8501`.
 2.  Under **Notifications**, you will find the full URL to subscribe to. Click the link or use the URL in the ntfy app (iOS/Android/Web) to receive alerts.
 3.  Under **Scheduler Settings**, enable the daily check and set your desired time. These settings will be saved to your database.
 
+## Run Tests
+
+To run the test suite, install `pytest` and then run the following command:
+
+```sh
+python -m pytest
+```
+
 ## How It Works
 
 * **Database Backend**: The app connects to a PostgreSQL database using SQLAlchemy. It manages a `price_history` table for logging prices and a `schedule_settings` table for the UI configuration.

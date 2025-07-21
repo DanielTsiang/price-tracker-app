@@ -40,7 +40,7 @@ class TestDatabaseOperations:
         """Test successful database initialisation."""
         # Clear the cache to ensure the function runs
         init_database.clear()
-        
+
         engine, connection = mock_engine
 
         init_database(engine)
@@ -357,6 +357,7 @@ class TestDataFrameOperations:
             "Date": ["2024-01-15"],
             "Time": ["14:30:45"],
             "Price": [1399.00],
+            "created_at": [mock_now],
         }
         mock_dataframe.assert_called_once_with(expected_data)
 

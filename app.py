@@ -193,6 +193,7 @@ def update_price_history(price: float, engine: Engine) -> bool:
                 "Date": [now.strftime("%Y-%m-%d")],
                 "Time": [now.strftime("%H:%M:%S")],
                 "Price": [price],
+                "created_at": [now],
             }
         )
         new_entry.to_sql("price_history", con=engine, if_exists="append", index=False)

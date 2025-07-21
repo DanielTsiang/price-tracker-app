@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import datetime, time
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -12,6 +13,7 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+london_tz = ZoneInfo("Europe/London")
 
 # --- Constants ---
 PRODUCT_URL: str = "https://www.dreams.co.uk/flaxby-oxtons-guild-pocket-sprung-mattress/p/135-01363/variant-selector?changedCategoryCode=b2c_comfort_grade&changedCategoryValue=VERY_FIRM&previousProductCode=135-01361"
@@ -160,10 +162,32 @@ def get_mattress_price() -> float | None:
 
 
 # --- Database Handling ---
+def get_latest_price(engine: Engine) -> dict:
+    """Fetches the most recent price from the database for the API endpoint."""
+    try:
+        with engine.connect() as connection:
+            latest_price_query = text(
+                'SELECT "Price", "created_at" FROM price_history ORDER BY created_at DESC LIMIT 1'
+            )
+            result = connection.execute(latest_price_query).first()
+
+        if result:
+            price, timestamp = result
+            uk_time = timestamp.astimezone(london_tz)
+            formatted_timestamp = uk_time.strftime("%A %d %B %Y at %I:%M %p %Z")
+            # Convert decimal to float for JSON serialization
+            return {"latestPrice": float(price), "timestamp": formatted_timestamp}
+        else:
+            return {"error": "No price history found"}
+    except Exception as e:
+        logger.error(f"API Error fetching latest price: {e}")
+        return {"error": "Failed to retrieve latest price from the database."}
+
+
 def update_price_history(price: float, engine: Engine) -> bool:
     """Writes the new price and timestamp to the database."""
     try:
-        now: datetime = datetime.now()
+        now: datetime = datetime.now(tz=london_tz)
         new_entry: pd.DataFrame = pd.DataFrame(
             {
                 "Date": [now.strftime("%Y-%m-%d")],
@@ -242,7 +266,7 @@ def scheduled_check_fragment(engine: Engine):
         return
 
     scheduled_time = st.session_state.schedule_time
-    now = datetime.now()
+    now = datetime.now(tz=london_tz)
 
     # A unique key for the current day and scheduled time
     run_key = f"{now.date()}-{scheduled_time.strftime('%H:%M')}"
@@ -265,18 +289,22 @@ def scheduled_check_fragment(engine: Engine):
 
 def main() -> None:
     """The main function for the Streamlit application."""
-    # --- Health Check Endpoint ---
-    # If the 'endpoint' query parameter is set to 'health', return a JSON response and exit.
-    if st.query_params.get("endpoint") == "health":
-        st.json({"health": "green"})
+    engine = get_database_engine()
+
+    # Handle API endpoints before rendering the main page.
+    if endpoint := st.query_params.get("endpoint"):
+        if endpoint == "health":
+            st.json({"health": "green"})
+        elif endpoint == "latestPrice":
+            st.json(get_latest_price(engine))
+        # Stop execution after handling an API call to prevent rendering the UI.
         return
 
     st.set_page_config(
         page_title="Mattress Price Tracker", page_icon="🛏️", layout="wide"
     )
 
-    # Get DB engine and initialize the table
-    engine = get_database_engine()
+    # Initialise the database tables if they don't exist.
     init_database(engine)
 
     st.title("Mattress Price Tracker")

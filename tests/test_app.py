@@ -1,5 +1,6 @@
 from datetime import datetime, time
 from unittest.mock import Mock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 import requests
@@ -8,29 +9,32 @@ from sqlalchemy.exc import SQLAlchemyError
 from app import (
     NTFY_TOPIC,
     PRODUCT_URL,
+    get_latest_price,
     get_mattress_price,
     init_database,
     load_schedule,
+    london_tz,
+    main,
     run_price_check_job,
     save_schedule,
     send_nfty_notification,
     update_price_history,
 )
 
+@pytest.fixture
+def mock_engine():
+    """Mock SQLAlchemy engine for testing."""
+    engine = Mock()
+    connection = Mock()
+    context_manager = Mock()
+    context_manager.__enter__ = Mock(return_value=connection)
+    context_manager.__exit__ = Mock(return_value=None)
+    engine.connect.return_value = context_manager
+    return engine, connection
+
 
 class TestDatabaseOperations:
     """Tests for database-related functions."""
-
-    @pytest.fixture
-    def mock_engine(self):
-        """Mock SQLAlchemy engine for testing."""
-        engine = Mock()
-        connection = Mock()
-        context_manager = Mock()
-        context_manager.__enter__ = Mock(return_value=connection)
-        context_manager.__exit__ = Mock(return_value=None)
-        engine.connect.return_value = context_manager
-        return engine, connection
 
     def test_init_database_success(self, mock_engine):
         """Test successful database initialization."""
@@ -165,30 +169,77 @@ class TestPriceFetching:
             mock_error.assert_called_once()
 
 
+class TestGetLatestPrice:
+    """Tests for get_latest_price functionality."""
+
+    def test_get_latest_price_success(self, mock_engine):
+        """Test successful latest price retrieval."""
+        engine, connection = mock_engine
+
+        # Mock database result
+        mock_result = Mock()
+        mock_result.Price = 1399.99
+        mock_result.created_at = datetime(
+            2025, 6, 15, 14, 30, 45, tzinfo=ZoneInfo("Europe/London")
+        )
+        connection.execute.return_value.first.return_value = (
+            mock_result.Price,
+            mock_result.created_at,
+        )
+
+        result = get_latest_price(engine)
+
+        assert "latestPrice" in result
+        assert result["latestPrice"] == 1399.99
+        assert "timestamp" in result
+        assert result["timestamp"] == "Sunday 15 June 2025 at 02:30 PM BST"
+
+    def test_get_latest_price_no_data(self, mock_engine):
+        """Test latest price retrieval when no data exists."""
+        engine, connection = mock_engine
+        connection.execute.return_value.first.return_value = None
+
+        result = get_latest_price(engine)
+
+        assert result == {"error": "No price history found"}
+
+    def test_get_latest_price_database_error(self, mock_engine):
+        """Test latest price retrieval with database error."""
+        engine, connection = mock_engine
+        connection.execute.side_effect = Exception("Database error")
+
+        result = get_latest_price(engine)
+
+        assert "error" in result
+        assert result["error"] == "Failed to retrieve latest price from the database."
+
+
 class TestPriceHistoryUpdate:
     """Tests for price history update functionality."""
 
     @patch("pandas.DataFrame.to_sql")
     @patch("app.datetime")
-    def test_update_price_history_success(self, mock_datetime, mock_to_sql):
+    def test_update_price_history_success(
+        self, mock_datetime, mock_to_sql, mock_engine
+    ):
         """Test successful price history update."""
-        mock_now = datetime(2024, 1, 15, 14, 30, 45)
+        mock_now = datetime(2024, 7, 21, 22, 30, 45, tzinfo=london_tz)
         mock_datetime.now.return_value = mock_now
-
-        engine = Mock()
+        engine, connection = mock_engine
 
         result = update_price_history(1399, engine)
 
         assert result is True
+        mock_datetime.now.assert_called_once_with(tz=london_tz)
         mock_to_sql.assert_called_once_with(
             "price_history", con=engine, if_exists="append", index=False
         )
 
     @patch("pandas.DataFrame.to_sql")
-    def test_update_price_history_failure(self, mock_to_sql):
+    def test_update_price_history_failure(self, mock_to_sql, mock_engine):
         """Test price history update failure."""
         mock_to_sql.side_effect = Exception("Database error")
-        engine = Mock()
+        engine, connection = mock_engine
 
         with patch("streamlit.error") as mock_error:
             result = update_price_history(1399, engine)
@@ -232,12 +283,12 @@ class TestPriceCheckJob:
     @patch("app.update_price_history")
     @patch("app.get_mattress_price")
     def test_run_price_check_job_success(
-        self, mock_get_price, mock_update_history, mock_send_notification
+        self, mock_get_price, mock_update_history, mock_send_notification, mock_engine
     ):
         """Test successful price check job execution."""
         mock_get_price.return_value = 1399
         mock_update_history.return_value = True
-        engine = Mock()
+        engine, connection = mock_engine
 
         with patch("streamlit.toast") as mock_toast:
             run_price_check_job(engine)
@@ -250,10 +301,10 @@ class TestPriceCheckJob:
             )
 
     @patch("app.get_mattress_price")
-    def test_run_price_check_job_price_fetch_failure(self, mock_get_price):
+    def test_run_price_check_job_price_fetch_failure(self, mock_get_price, mock_engine):
         """Test price check job when price fetching fails."""
         mock_get_price.return_value = None
-        engine = Mock()
+        engine, connection = mock_engine
 
         with patch("streamlit.toast") as mock_toast:
             run_price_check_job(engine)
@@ -263,12 +314,12 @@ class TestPriceCheckJob:
     @patch("app.update_price_history")
     @patch("app.get_mattress_price")
     def test_run_price_check_job_database_update_failure(
-        self, mock_get_price, mock_update_history
+        self, mock_get_price, mock_update_history, mock_engine
     ):
         """Test price check job when database update fails."""
         mock_get_price.return_value = 1399
         mock_update_history.return_value = False
-        engine = Mock()
+        engine, connection = mock_engine
 
         with patch("streamlit.toast") as mock_toast:
             run_price_check_job(engine)
@@ -279,18 +330,115 @@ class TestPriceCheckJob:
 class TestDataFrameOperations:
     """Tests for DataFrame operations in price history updates."""
 
+    @patch("pandas.DataFrame")
     @patch("app.datetime")
-    def test_price_history_dataframe_structure(self, mock_datetime):
+    def test_price_history_dataframe_structure(
+        self, mock_datetime, mock_dataframe, mock_engine
+    ):
         """Test that the DataFrame is structured correctly for price history."""
-        mock_now = datetime(2024, 1, 15, 14, 30, 45)
+        mock_now = datetime(2024, 1, 15, 14, 30, 45, tzinfo=london_tz)
         mock_datetime.now.return_value = mock_now
+        engine, connection = mock_engine
 
-        with patch("pandas.DataFrame.to_sql") as mock_to_sql:
-            engine = Mock()
-            update_price_history(1399, engine)
+        # Mock DataFrame instance
+        mock_df_instance = Mock()
+        mock_dataframe.return_value = mock_df_instance
 
-            # Verify DataFrame was created with correct structure
-            call_args = mock_to_sql.call_args
-            assert call_args[1]["con"] == engine
-            assert call_args[1]["if_exists"] == "append"
-            assert call_args[1]["index"] is False
+        update_price_history(1399.00, engine)
+
+        # Verify DataFrame was created with correct data structure
+        expected_data = {
+            "Date": ["2024-01-15"],
+            "Time": ["14:30:45"],
+            "Price": [1399.00],
+        }
+        mock_dataframe.assert_called_once_with(expected_data)
+
+        # Verify to_sql was called with correct parameters
+        mock_df_instance.to_sql.assert_called_once_with(
+            "price_history", con=engine, if_exists="append", index=False
+        )
+
+
+class TestAPIEndpoints:
+    """Tests for API endpoints functionality."""
+
+    @patch("streamlit.query_params")
+    @patch("streamlit.json")
+    def test_health_endpoint(self, mock_json, mock_query_params):
+        """Test health endpoint returns correct response."""
+        mock_query_params.get.return_value = "health"
+
+        main()
+
+        mock_json.assert_called_once_with({"health": "green"})
+
+    @patch("streamlit.query_params")
+    @patch("streamlit.json")
+    @patch("app.get_latest_price")
+    def test_latest_price_endpoint_success(
+        self, mock_get_latest_price, mock_json, mock_query_params
+    ):
+        """Test latestPrice endpoint returns price data."""
+        mock_query_params.get.return_value = "latestPrice"
+        mock_get_latest_price.return_value = {
+            "latestPrice": 1399.99,
+            "timestamp": "Monday 15 January 2024 at 02:30 PM GMT",
+        }
+
+        main()
+
+        mock_json.assert_called_once_with(
+            {
+                "latestPrice": 1399.99,
+                "timestamp": "Monday 15 January 2024 at 02:30 PM GMT",
+            }
+        )
+
+    @patch("streamlit.query_params")
+    @patch("streamlit.set_page_config")
+    def test_no_endpoint_continues_to_main_app(
+            self, mock_set_page_config, mock_query_params
+    ):
+        """Test that when no endpoint is specified, the main app UI loads."""
+        mock_query_params.get.return_value = None
+
+        mock_session_state = Mock()
+        mock_session_state.__contains__ = Mock(return_value=True)
+        mock_session_state.schedule_time = time(9, 0)
+        mock_session_state.schedule_enabled = True
+        mock_session_state.last_run_key = None
+
+        mock_col1 = Mock()
+        mock_col1.__enter__ = Mock(return_value=mock_col1)
+        mock_col1.__exit__ = Mock(return_value=None)
+
+        mock_col2 = Mock()
+        mock_col2.__enter__ = Mock(return_value=mock_col2)
+        mock_col2.__exit__ = Mock(return_value=None)
+
+        # Mock other dependencies to prevent full app execution
+        with patch("app.get_database_engine") as mock_get_engine, \
+                patch("streamlit.columns") as mock_columns, \
+                patch("app.load_schedule") as mock_load_schedule, \
+                patch("streamlit.session_state", mock_session_state):
+            mock_engine = Mock()
+            mock_get_engine.return_value = mock_engine
+            mock_load_schedule.return_value = (time(9, 0), True)
+
+            mock_columns.return_value = [mock_col1, mock_col2]
+
+            main()
+
+            # Verify the main app setup was called
+            mock_set_page_config.assert_called_once_with(
+                page_title="Mattress Price Tracker", page_icon="🛏️", layout="wide"
+            )
+
+    @patch("streamlit.query_params")
+    def test_unknown_endpoint_returns_none(self, mock_query_params):
+        """Test that unknown endpoints don't break the application."""
+        mock_query_params.get.return_value = "unknown_endpoint"
+
+        # Should not raise an exception and should return early
+        assert main() is None

@@ -295,8 +295,10 @@ def main() -> None:
     if endpoint := st.query_params.get("endpoint"):
         if endpoint == "health":
             st.json({"health": "green"})
+            return
         elif endpoint == "latestPrice":
             st.json(get_latest_price(engine))
+            return
 
     st.set_page_config(
         page_title="Mattress Price Tracker", page_icon="🛏️", layout="wide"

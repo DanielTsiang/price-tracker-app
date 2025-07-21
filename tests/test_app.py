@@ -363,9 +363,10 @@ class TestDataFrameOperations:
 class TestAPIEndpoints:
     """Tests for API endpoints functionality."""
 
+    @patch("streamlit.set_page_config")
     @patch("streamlit.query_params")
     @patch("streamlit.json")
-    def test_health_endpoint(self, mock_json, mock_query_params):
+    def test_health_endpoint(self, mock_json, mock_query_params, mock_set_page_config):
         """Test health endpoint returns correct response."""
         mock_query_params.get.return_value = "health"
 
@@ -373,11 +374,15 @@ class TestAPIEndpoints:
 
         mock_json.assert_called_once_with({"health": "green"})
 
+        # Verify the main app setup was never called
+        mock_set_page_config.assert_not_called()
+
+    @patch("streamlit.set_page_config")
     @patch("streamlit.query_params")
     @patch("streamlit.json")
     @patch("app.get_latest_price")
     def test_latest_price_endpoint_success(
-        self, mock_get_latest_price, mock_json, mock_query_params
+        self, mock_get_latest_price, mock_json, mock_query_params, mock_set_page_config
     ):
         """Test latestPrice endpoint returns price data."""
         mock_query_params.get.return_value = "latestPrice"
@@ -394,6 +399,9 @@ class TestAPIEndpoints:
                 "timestamp": "Monday 15 January 2024 at 02:30 PM GMT",
             }
         )
+
+        # Verify the main app setup was never called
+        mock_set_page_config.assert_not_called()
 
     @pytest.mark.parametrize("endpoint_param", ["unknown_endpoint", None])
     @patch("streamlit.query_params")

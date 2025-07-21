@@ -87,7 +87,7 @@ This project uses `pytest` for testing. The tests are located in the `tests/` di
 Install the additional packages required for testing:
 
 ```
-pip install -r requirements_test.txt
+pip install -r tests/requirements_test.txt
 ```
 
 #### 2. Run Tests

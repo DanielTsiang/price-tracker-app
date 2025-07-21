@@ -42,11 +42,11 @@ def get_database_engine() -> Engine:
         )
         st.stop()
 
-
-def init_database(engine):
-    """Initializes the database tables if they don't exist."""
+@st.cache_resource
+def init_database(_engine):
+    """Initialises the database tables if they don't exist."""
     try:
-        with engine.connect() as connection:
+        with _engine.connect() as connection:
             # Create price history table
             connection.execute(
                 text(

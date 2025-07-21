@@ -37,7 +37,10 @@ class TestDatabaseOperations:
     """Tests for database-related functions."""
 
     def test_init_database_success(self, mock_engine):
-        """Test successful database initialization."""
+        """Test successful database initialisation."""
+        # Clear the cache to ensure the function runs
+        init_database.clear()
+        
         engine, connection = mock_engine
 
         init_database(engine)
@@ -47,7 +50,10 @@ class TestDatabaseOperations:
         connection.commit.assert_called_once()
 
     def test_init_database_failure(self, mock_engine):
-        """Test database initialization failure."""
+        """Test database initialisation failure."""
+        # Clear the cache to ensure the function runs
+        init_database.clear()
+
         engine, connection = mock_engine
         connection.execute.side_effect = SQLAlchemyError("Database error")
 

@@ -395,13 +395,14 @@ class TestAPIEndpoints:
             }
         )
 
+    @pytest.mark.parametrize("endpoint_param", ["unknown_endpoint", None])
     @patch("streamlit.query_params")
     @patch("streamlit.set_page_config")
-    def test_no_endpoint_continues_to_main_app(
-            self, mock_set_page_config, mock_query_params
+    def test_unknown_or_no_endpoint_continues_to_main_app(
+            self, mock_set_page_config, mock_query_params, endpoint_param
     ):
-        """Test that when no endpoint is specified, the main app UI loads."""
-        mock_query_params.get.return_value = None
+        """Test that when an unknown endpoint or no endpoint is specified, the main app UI loads."""
+        mock_query_params.get.return_value = endpoint_param
 
         mock_session_state = Mock()
         mock_session_state.__contains__ = Mock(return_value=True)
@@ -434,11 +435,3 @@ class TestAPIEndpoints:
             mock_set_page_config.assert_called_once_with(
                 page_title="Mattress Price Tracker", page_icon="🛏️", layout="wide"
             )
-
-    @patch("streamlit.query_params")
-    def test_unknown_endpoint_returns_none(self, mock_query_params):
-        """Test that unknown endpoints don't break the application."""
-        mock_query_params.get.return_value = "unknown_endpoint"
-
-        # Should not raise an exception and should return early
-        assert main() is None

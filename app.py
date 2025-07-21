@@ -297,8 +297,6 @@ def main() -> None:
             st.json({"health": "green"})
         elif endpoint == "latestPrice":
             st.json(get_latest_price(engine))
-        # Stop execution after handling an API call to prevent rendering the UI.
-        return
 
     st.set_page_config(
         page_title="Mattress Price Tracker", page_icon="🛏️", layout="wide"

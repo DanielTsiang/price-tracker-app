@@ -95,7 +95,7 @@ pip install -r tests/requirements_test.txt
 To run the test suite, navigate to the root directory of the project and run the following command:
 
 ```
-pytest
+python -m pytest
 ```
 
 ## How It Works

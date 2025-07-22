@@ -2,8 +2,8 @@ name: Keep Streamlit App Alive
 
 on:
   schedule:
-    # Runs every 5 minutes to prevent free-tier app from sleeping
-    - cron: '*/5 * * * *'
+    # Runs every 4 minutes to prevent free-tier app from sleeping
+    - cron: '*/4 * * * *'
   workflow_dispatch: # Allow running this workflow manually from the Actions tab
 
 jobs:

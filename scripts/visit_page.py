@@ -2,11 +2,9 @@ import os
 import sys
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError, expect
 
-# Get the URLs from an environment variable, split by comma
-if app_urls_str := os.getenv("APP_URLS"):
-    APP_URLS = [url.strip() for url in app_urls_str.split(',')]
-else:
-    raise ValueError("APP_URLS environment variable is not set or empty.")
+app_url = os.getenv("APP_URL")
+if app_url is None:
+    raise ValueError("APP_URL environment variable is not set or empty.")
 
 
 def visit_url(url: str):
@@ -30,7 +28,7 @@ def visit_url(url: str):
                 sys.exit(1)
 
             # Use expect to wait for the body to contain the target text.
-            # This is more robust as it polls the page until the text appears or the timeout is reached.
+            # This is robust as it polls the page until the text appears or the timeout is reached.
             expect(page.locator("body")).to_contain_text(
                 '"latestPrice"', timeout=60000  # 1-minute timeout for text presence
             )
@@ -56,5 +54,4 @@ def visit_url(url: str):
 
 
 if __name__ == "__main__":
-    for app_url in APP_URLS:
-        visit_url(app_url)
+    visit_url(app_url)

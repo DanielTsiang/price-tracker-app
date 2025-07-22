@@ -1,0 +1,30 @@
+name: Keep Streamlit Apps Alive
+
+on:
+  schedule:
+    # Runs every 5 minutes to prevent free-tier apps from sleeping
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # Allow running this workflow manually from the Actions tab
+
+jobs:
+  visit-sites:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install Playwright and dependencies
+        run: |
+          pip install playwright==1.54.0
+          python -m playwright install --with-deps chromium
+
+      - name: Visit the Streamlit apps
+        env:
+          # A comma-separated list of the app URLs to keep alive
+          APP_URLS: "https://price-tracker-app-5joo.onrender.com/?endpoint=latestPrice,https://price-tracker-mattress.streamlit.app/?endpoint=latestPrice"
+        run: python scripts/visit_page.py

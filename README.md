@@ -1,6 +1,7 @@
 # Mattress Price Tracker 🛏️
 
-This Streamlit application automates the process of checking and tracking the price of a specific mattress from the Dreams.co.uk website. It uses the `requests` library to **call the website's internal API directly**, making it a fast and efficient way to retrieve the accurate price for a specific product configuration.
+This Streamlit application automates the process of checking and tracking the price of a specific mattress from the Dreams.co.uk website. It uses the `requests` library to **call the website's internal API directly**,
+making it a fast and efficient way to retrieve the accurate price for a specific product configuration.
 
 The app features both manual and scheduled price checks, logs the price history to a PostgreSQL database, and sends push notifications for scheduled updates. The entire scheduling and checking process is handled within the Streamlit framework.
 
@@ -66,7 +67,8 @@ streamlit run app.py
 
 **Option** B: For Debugging in an IDE **(e.g., PyCharm)**
 
-To run the app in a way that allows you to use your IDE's debugger, run `run_debug.py` from your IDE. This will start the Streamlit server and allow you to set breakpoints and debug your `app.py` script as you would with any other Python program.
+To run the app in a way that allows you to use your IDE's debugger, run `run_debug.py` from your IDE with the `DATABASE_URL` environment variable set.
+This will start the Streamlit server and allow you to set breakpoints and debug your `app.py` script as you would with any other Python program.
 
 Your web browser will open a new tab at `http://localhost:8501`.
 

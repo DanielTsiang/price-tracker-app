@@ -8,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app import (
     NTFY_TOPIC,
-    PRODUCT_URL,
+    PRODUCT_URL_JSON,
     get_latest_price,
     get_mattress_price,
     init_database,
@@ -132,7 +132,7 @@ class TestPriceFetching:
         price = get_mattress_price()
 
         assert price == 1399
-        mock_get.assert_called_once_with(PRODUCT_URL, timeout=15)
+        mock_get.assert_called_once_with(PRODUCT_URL_JSON, timeout=15)
         mock_response.raise_for_status.assert_called_once()
 
     @patch("requests.get")

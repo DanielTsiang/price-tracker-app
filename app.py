@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 london_tz = ZoneInfo("Europe/London")
 
 # --- Constants ---
-PRODUCT_URL: str = "https://www.dreams.co.uk/flaxby-oxtons-guild-pocket-sprung-mattress/p/135-01363/variant-selector?changedCategoryCode=b2c_comfort_grade&changedCategoryValue=VERY_FIRM&previousProductCode=135-01361"
+PRODUCT_URL: str = "https://www.dreams.co.uk/flaxby-oxtons-guild-pocket-sprung-mattress/p/131-01043-configurable?variant=135-01363"
+PRODUCT_URL_JSON: str = "https://www.dreams.co.uk/flaxby-oxtons-guild-pocket-sprung-mattress/p/135-01363/variant-selector?changedCategoryCode=b2c_comfort_grade&changedCategoryValue=VERY_FIRM&previousProductCode=135-01361"
 NTFY_TOPIC: str = "mattress-price-tracker-flaxby"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -141,7 +142,7 @@ def get_mattress_price() -> float | None:
     logger.info("Calling Dreams API to check price...")
 
     try:
-        response = requests.get(PRODUCT_URL, timeout=15)
+        response = requests.get(PRODUCT_URL_JSON, timeout=15)
         response.raise_for_status()  # Raises an HTTPError for bad responses (4xx or 5xx)
 
         data = response.json()
@@ -380,7 +381,7 @@ def main() -> None:
 
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.markdown(f"Tracking price for [Flaxby Oxtons Guild]({PRODUCT_URL}).")
+        st.markdown(f"Tracking price for [Flaxby Oxtons Guild Pocket Sprung Mattress]({PRODUCT_URL}).")
         st.write(f"**Specs:** {DESIRED_SIZE}, {DESIRED_COMFORT}, {DESIRED_ZIPPED}")
 
         if st.button("Check Price Now", type="primary"):
